@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Random Name Picker - CSV Upload</title> 
+    <title>Random Name Picker - Excel Upload</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -100,9 +100,43 @@
         
         .names {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 10px;
             font-size: 14px;
+        }
+        
+        .name-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        
+        .name-item.active {
+            background-color: #d4edda;
+            border-left: 3px solid #28a745;
+        }
+        
+        .name-item.inactive {
+            background-color: #f8d7da;
+            border-left: 3px solid #dc3545;
+            opacity: 0.7;
+        }
+        
+        .status-badge {
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            color: white;
+        }
+        
+        .status-badge.active {
+            background-color: #28a745;
+        }
+        
+        .status-badge.inactive {
+            background-color: #dc3545;
         }
         
         .status {
@@ -123,7 +157,7 @@
             border: 1px solid #f5c6cb;
         }
         
-        .csv-format {
+        .excel-format {
             font-size: 12px;
             color: #666;
             margin-top: 10px;
@@ -133,21 +167,56 @@
         .hidden {
             display: none;
         }
+        
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 18px;
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+        }
+        
+        .loading {
+            color: #007bff;
+            font-style: italic;
+        }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <h1>🎲 Random Name Picker - CSV Upload</h1>
+        <h1>🎲 Random Name Picker - Excel Upload</h1>
         
         <div class="upload-section">
-            <h3>Upload CSV File</h3>
+            <h3>Upload Excel File</h3>
             <div class="file-input">
-                <input type="file" id="csvFile" accept=".csv" onchange="handleFileUpload(event)">
+                <input type="file" id="excelFile" accept=".xlsx,.xls" onchange="handleFileUpload(event)">
                 <button onclick="loadSampleData()">Use Sample Data</button>
             </div>
-            <div class="csv-format">
-                <strong>CSV Format:</strong> One name per line or comma-separated names<br>
-                Example: Alice,Bob,Charlie or each name on a new line
+            <div class="excel-format">
+                <strong>Excel Format:</strong> Two columns - Name (Column A) and Active (Column B)<br>
+                <strong>First row will be ignored (headers)</strong><br>
+                Example:<br>
+                Row 1: Name | Active (header - ignored)<br>
+                Row 2: Alice Johnson | 1<br>
+                Row 3: Bob Smith | 0<br>
+                Row 4: Charlie Brown | 1
             </div>
         </div>
         
@@ -161,73 +230,155 @@
         <div class="result" id="selectedName"></div>
         
         <div class="name-list hidden" id="nameListContainer">
-            <h3>Loaded Names (<span id="nameCount">0</span>)</h3>
+            <h3>Loaded Names</h3>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-number" id="totalCount">0</div>
+                    <div class="stat-label">Total Names</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="activeCount">0</div>
+                    <div class="stat-label">Active Names</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="inactiveCount">0</div>
+                    <div class="stat-label">Inactive Names</div>
+                </div>
+            </div>
             <div class="names" id="namesList"></div>
         </div>
     </div>
 
     <script>
-        let names = [];
+        let allNames = [];
+        let activeNames = [];
 
         // Handle file upload
         function handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
 
+            if (!file.name.match(/\.(xlsx|xls)$/)) {
+                showStatus('Please select a valid Excel file (.xlsx or .xls)', 'error');
+                return;
+            }
+
+            showStatus('Reading Excel file...', 'loading');
+
             const reader = new FileReader();
             reader.onload = function(e) {
-                const csvContent = e.target.result;
-                parseCSV(csvContent);
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    parseExcel(workbook);
+                } catch (error) {
+                    showStatus('Error reading Excel file. Please make sure it\'s a valid Excel file.', 'error');
+                    console.error('Excel reading error:', error);
+                }
             };
-            reader.readAsText(file);
+            reader.readAsArrayBuffer(file);
         }
 
-        // Parse CSV content
-        function parseCSV(csvContent) {
+        // Parse Excel content
+        function parseExcel(workbook) {
             try {
-                const lines = csvContent.split('\n');
-                const parsedNames = [];
+                // Get the first worksheet
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                
+                // Convert to JSON, starting from row 2 (skip header)
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+                    header: ['name', 'active'],
+                    range: 1 // Skip first row (header)
+                });
 
-                lines.forEach(line => {
-                    line = line.trim();
-                    if (line) {
-                        if (line.includes(',')) {
-                            const lineNames = line.split(',').map(name => name.trim()).filter(name => name);
-                            parsedNames.push(...lineNames);
+                const parsedData = [];
+
+                jsonData.forEach((row, index) => {
+                    if (row.name && row.name.toString().trim()) {
+                        const name = row.name.toString().trim();
+                        const activeValue = row.active;
+                        
+                        // Handle different ways the active column might be formatted
+                        let isActive = false;
+                        if (activeValue === 1 || activeValue === '1' || 
+                            activeValue === true || activeValue === 'true' || 
+                            activeValue === 'TRUE' || activeValue === 'True') {
+                            isActive = true;
+                        } else if (activeValue === 0 || activeValue === '0' || 
+                                 activeValue === false || activeValue === 'false' || 
+                                 activeValue === 'FALSE' || activeValue === 'False') {
+                            isActive = false;
                         } else {
-                            parsedNames.push(line);
+                            console.warn(`Row ${index + 2}: Invalid active value "${activeValue}" for "${name}". Treating as inactive.`);
+                            isActive = false;
                         }
+
+                        parsedData.push({
+                            name: name,
+                            active: isActive
+                        });
                     }
                 });
 
-                names = [...new Set(parsedNames)].filter(name => name.length > 0);
-
-                if (names.length === 0) {
-                    showStatus('No valid names found in the CSV file.', 'error');
+                if (parsedData.length === 0) {
+                    showStatus('No valid names found in the Excel file. Please check the format and make sure there\'s data starting from row 2.', 'error');
                     return;
                 }
 
-                showStatus(`Successfully loaded ${names.length} names!`, 'success');
+                // Remove duplicates based on name
+                const uniqueNames = [];
+                const seenNames = new Set();
+                
+                parsedData.forEach(item => {
+                    if (!seenNames.has(item.name.toLowerCase())) {
+                        seenNames.add(item.name.toLowerCase());
+                        uniqueNames.push(item);
+                    }
+                });
+
+                allNames = uniqueNames;
+                activeNames = allNames.filter(item => item.active).map(item => item.name);
+
+                if (activeNames.length === 0) {
+                    showStatus('No active names found in the Excel file. All names are marked as inactive.', 'error');
+                } else {
+                    showStatus(`Successfully loaded ${allNames.length} names (${activeNames.length} active)!`, 'success');
+                }
+
                 displayNamesList();
                 showControls();
                 clearResult();
 
             } catch (error) {
-                showStatus('Error parsing CSV file. Please check the format.', 'error');
-                console.error('CSV parsing error:', error);
+                showStatus('Error parsing Excel file. Please check the format.', 'error');
+                console.error('Excel parsing error:', error);
             }
         }
 
         // Load sample data
         function loadSampleData() {
-            names = [
-                "Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Edward Norton",
-                "Fiona Apple", "George Lucas", "Hannah Montana", "Isaac Newton", "Julia Roberts",
-                "Kevin Hart", "Luna Lovegood", "Michael Jordan", "Nina Simone", "Oliver Twist",
-                "Petra Collins", "Quinn Fabray", "Rachel Green", "Samuel Jackson", "Tina Turner"
+            allNames = [
+                { name: "Alice Johnson", active: true },
+                { name: "Bob Smith", active: false },
+                { name: "Charlie Brown", active: true },
+                { name: "Diana Prince", active: true },
+                { name: "Edward Norton", active: false },
+                { name: "Fiona Apple", active: true },
+                { name: "George Lucas", active: true },
+                { name: "Hannah Montana", active: false },
+                { name: "Isaac Newton", active: true },
+                { name: "Julia Roberts", active: true },
+                { name: "Kevin Hart", active: false },
+                { name: "Luna Lovegood", active: true },
+                { name: "Michael Jordan", active: true },
+                { name: "Nina Simone", active: false },
+                { name: "Oliver Twist", active: true }
             ];
             
-            showStatus(`Sample data loaded with ${names.length} names!`, 'success');
+            activeNames = allNames.filter(item => item.active).map(item => item.name);
+            
+            showStatus(`Sample data loaded with ${allNames.length} names (${activeNames.length} active)!`, 'success');
             displayNamesList();
             showControls();
             clearResult();
@@ -235,13 +386,13 @@
 
         // Pick a random name
         function pickRandomName() {
-            if (names.length === 0) {
-                showStatus('Please upload a CSV file or load sample data first.', 'error');
+            if (activeNames.length === 0) {
+                showStatus('No active names available for selection. Please upload an Excel file with active names (marked as 1).', 'error');
                 return;
             }
 
-            const randomIndex = Math.floor(Math.random() * names.length);
-            const selectedName = names[randomIndex];
+            const randomIndex = Math.floor(Math.random() * activeNames.length);
+            const selectedName = activeNames[randomIndex];
             
             const resultElement = document.getElementById('selectedName');
             resultElement.style.opacity = '0';
@@ -255,10 +406,25 @@
         // Display names list
         function displayNamesList() {
             const namesListElement = document.getElementById('namesList');
-            const nameCountElement = document.getElementById('nameCount');
+            const totalCountElement = document.getElementById('totalCount');
+            const activeCountElement = document.getElementById('activeCount');
+            const inactiveCountElement = document.getElementById('inactiveCount');
             
-            namesListElement.innerHTML = names.map(name => `<div>${name}</div>`).join('');
-            nameCountElement.textContent = names.length;
+            const activeCount = allNames.filter(item => item.active).length;
+            const inactiveCount = allNames.length - activeCount;
+            
+            namesListElement.innerHTML = allNames.map(item => 
+                `<div class="name-item ${item.active ? 'active' : 'inactive'}">
+                    <span>${item.name}</span>
+                    <span class="status-badge ${item.active ? 'active' : 'inactive'}">
+                        ${item.active ? 'Active' : 'Inactive'}
+                    </span>
+                </div>`
+            ).join('');
+            
+            totalCountElement.textContent = allNames.length;
+            activeCountElement.textContent = activeCount;
+            inactiveCountElement.textContent = inactiveCount;
             
             document.getElementById('nameListContainer').classList.remove('hidden');
         }
@@ -284,8 +450,9 @@
 
         // Clear all data
         function clearData() {
-            names = [];
-            document.getElementById('csvFile').value = '';
+            allNames = [];
+            activeNames = [];
+            document.getElementById('excelFile').value = '';
             document.getElementById('controls').classList.add('hidden');
             document.getElementById('nameListContainer').classList.add('hidden');
             document.getElementById('status').classList.add('hidden');
