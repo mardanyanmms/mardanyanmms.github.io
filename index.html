@@ -157,6 +157,12 @@
             border: 1px solid #f5c6cb;
         }
         
+        .status.loading {
+            background-color: #cce7ff;
+            color: #004085;
+            border: 1px solid #b3d9ff;
+        }
+        
         .excel-format {
             font-size: 12px;
             color: #666;
@@ -192,12 +198,15 @@
             color: #6c757d;
         }
         
-        .loading {
-            color: #007bff;
-            font-style: italic;
+        .library-status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
         }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -218,6 +227,7 @@
                 Row 3: Bob Smith | 0<br>
                 Row 4: Charlie Brown | 1
             </div>
+            <div class="library-status" id="libraryStatus">Loading Excel library...</div>
         </div>
         
         <div id="status" class="status hidden"></div>
@@ -252,14 +262,55 @@
     <script>
         let allNames = [];
         let activeNames = [];
+        let xlsxLoaded = false;
+
+        // Load XLSX library
+        function loadXLSXLibrary() {
+            return new Promise((resolve, reject) => {
+                if (typeof XLSX !== 'undefined') {
+                    xlsxLoaded = true;
+                    resolve();
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+                script.onload = () => {
+                    xlsxLoaded = true;
+                    document.getElementById('libraryStatus').textContent = 'Excel library loaded successfully!';
+                    document.getElementById('libraryStatus').style.color = '#28a745';
+                    resolve();
+                };
+                script.onerror = () => {
+                    document.getElementById('libraryStatus').textContent = 'Failed to load Excel library. Please check your internet connection.';
+                    document.getElementById('libraryStatus').style.color = '#dc3545';
+                    reject(new Error('Failed to load XLSX library'));
+                };
+                document.head.appendChild(script);
+            });
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', async () => {
+            try {
+                await loadXLSXLibrary();
+            } catch (error) {
+                console.error('Failed to load XLSX library:', error);
+            }
+        });
 
         // Handle file upload
-        function handleFileUpload(event) {
+        async function handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
 
             if (!file.name.match(/\.(xlsx|xls)$/)) {
                 showStatus('Please select a valid Excel file (.xlsx or .xls)', 'error');
+                return;
+            }
+
+            if (!xlsxLoaded) {
+                showStatus('Excel library is still loading. Please wait a moment and try again.', 'error');
                 return;
             }
 
@@ -272,57 +323,85 @@
                     const workbook = XLSX.read(data, { type: 'array' });
                     parseExcel(workbook);
                 } catch (error) {
-                    showStatus('Error reading Excel file. Please make sure it\'s a valid Excel file.', 'error');
+                    showStatus(`Error reading Excel file: ${error.message}. Please make sure it's a valid Excel file.`, 'error');
                     console.error('Excel reading error:', error);
                 }
             };
+            
+            reader.onerror = function() {
+                showStatus('Error reading file. Please try again.', 'error');
+            };
+            
             reader.readAsArrayBuffer(file);
         }
 
         // Parse Excel content
         function parseExcel(workbook) {
             try {
+                if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                    showStatus('No worksheets found in the Excel file.', 'error');
+                    return;
+                }
+
                 // Get the first worksheet
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 
+                if (!worksheet) {
+                    showStatus('Unable to read the worksheet.', 'error');
+                    return;
+                }
+
                 // Convert to JSON, starting from row 2 (skip header)
                 const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-                    header: ['name', 'active'],
-                    range: 1 // Skip first row (header)
+                    header: 1, // Use array format
+                    defval: '' // Default value for empty cells
                 });
+
+                if (jsonData.length <= 1) {
+                    showStatus('No data found in the Excel file. Please make sure there are rows with data below the header.', 'error');
+                    return;
+                }
 
                 const parsedData = [];
 
-                jsonData.forEach((row, index) => {
-                    if (row.name && row.name.toString().trim()) {
-                        const name = row.name.toString().trim();
-                        const activeValue = row.active;
+                // Skip first row (header) and process data
+                for (let i = 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    
+                    if (row && row.length >= 2) {
+                        const name = row[0] ? row[0].toString().trim() : '';
+                        const activeValue = row[1];
                         
-                        // Handle different ways the active column might be formatted
-                        let isActive = false;
-                        if (activeValue === 1 || activeValue === '1' || 
-                            activeValue === true || activeValue === 'true' || 
-                            activeValue === 'TRUE' || activeValue === 'True') {
-                            isActive = true;
-                        } else if (activeValue === 0 || activeValue === '0' || 
-                                 activeValue === false || activeValue === 'false' || 
-                                 activeValue === 'FALSE' || activeValue === 'False') {
-                            isActive = false;
-                        } else {
-                            console.warn(`Row ${index + 2}: Invalid active value "${activeValue}" for "${name}". Treating as inactive.`);
-                            isActive = false;
-                        }
+                        if (name) {
+                            // Handle different ways the active column might be formatted
+                            let isActive = false;
+                            if (activeValue === 1 || activeValue === '1' || 
+                                activeValue === true || activeValue === 'true' || 
+                                activeValue === 'TRUE' || activeValue === 'True') {
+                                isActive = true;
+                            } else if (activeValue === 0 || activeValue === '0' || 
+                                     activeValue === false || activeValue === 'false' || 
+                                     activeValue === 'FALSE' || activeValue === 'False') {
+                                isActive = false;
+                            } else if (activeValue === '' || activeValue === null || activeValue === undefined) {
+                                console.warn(`Row ${i + 1}: Empty active value for "${name}". Treating as inactive.`);
+                                isActive = false;
+                            } else {
+                                console.warn(`Row ${i + 1}: Invalid active value "${activeValue}" for "${name}". Treating as inactive.`);
+                                isActive = false;
+                            }
 
-                        parsedData.push({
-                            name: name,
-                            active: isActive
-                        });
+                            parsedData.push({
+                                name: name,
+                                active: isActive
+                            });
+                        }
                     }
-                });
+                }
 
                 if (parsedData.length === 0) {
-                    showStatus('No valid names found in the Excel file. Please check the format and make sure there\'s data starting from row 2.', 'error');
+                    showStatus('No valid names found in the Excel file. Please check the format and make sure Column A contains names.', 'error');
                     return;
                 }
 
@@ -351,7 +430,7 @@
                 clearResult();
 
             } catch (error) {
-                showStatus('Error parsing Excel file. Please check the format.', 'error');
+                showStatus(`Error parsing Excel file: ${error.message}. Please check the format.`, 'error');
                 console.error('Excel parsing error:', error);
             }
         }
