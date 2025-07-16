@@ -79,6 +79,7 @@
             color: #28a745;
             margin: 20px 0;
             min-height: 30px;
+            transition: opacity 0.3s ease;
         }
         
         .name-list {
@@ -173,11 +174,6 @@
             const file = event.target.files[0];
             if (!file) return;
 
-            if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-                showStatus('Please select a valid CSV file.', 'error');
-                return;
-            }
-
             const reader = new FileReader();
             reader.onload = function(e) {
                 const csvContent = e.target.result;
@@ -189,25 +185,21 @@
         // Parse CSV content
         function parseCSV(csvContent) {
             try {
-                // Split by lines first, then by commas
                 const lines = csvContent.split('\n');
                 const parsedNames = [];
 
                 lines.forEach(line => {
                     line = line.trim();
                     if (line) {
-                        // Check if line contains commas (comma-separated)
                         if (line.includes(',')) {
                             const lineNames = line.split(',').map(name => name.trim()).filter(name => name);
                             parsedNames.push(...lineNames);
                         } else {
-                            // Single name per line
                             parsedNames.push(line);
                         }
                     }
                 });
 
-                // Remove duplicates and empty entries
                 names = [...new Set(parsedNames)].filter(name => name.length > 0);
 
                 if (names.length === 0) {
@@ -226,7 +218,7 @@
             }
         }
 
-        // Load sample data for demonstration
+        // Load sample data
         function loadSampleData() {
             names = [
                 "Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Edward Norton",
@@ -244,4 +236,66 @@
         // Pick a random name
         function pickRandomName() {
             if (names.length === 0) {
-                showStatus
+                showStatus('Please upload a CSV file or load sample data first.', 'error');
+                return;
+            }
+
+            const randomIndex = Math.floor(Math.random() * names.length);
+            const selectedName = names[randomIndex];
+            
+            const resultElement = document.getElementById('selectedName');
+            resultElement.style.opacity = '0';
+            
+            setTimeout(() => {
+                resultElement.textContent = `🎉 ${selectedName}`;
+                resultElement.style.opacity = '1';
+            }, 150);
+        }
+
+        // Display names list
+        function displayNamesList() {
+            const namesListElement = document.getElementById('namesList');
+            const nameCountElement = document.getElementById('nameCount');
+            
+            namesListElement.innerHTML = names.map(name => `<div>${name}</div>`).join('');
+            nameCountElement.textContent = names.length;
+            
+            document.getElementById('nameListContainer').classList.remove('hidden');
+        }
+
+        // Show status message
+        function showStatus(message, type) {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = message;
+            statusElement.className = `status ${type}`;
+            statusElement.classList.remove('hidden');
+            
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusElement.classList.add('hidden');
+                }, 3000);
+            }
+        }
+
+        // Show controls
+        function showControls() {
+            document.getElementById('controls').classList.remove('hidden');
+        }
+
+        // Clear all data
+        function clearData() {
+            names = [];
+            document.getElementById('csvFile').value = '';
+            document.getElementById('controls').classList.add('hidden');
+            document.getElementById('nameListContainer').classList.add('hidden');
+            document.getElementById('status').classList.add('hidden');
+            clearResult();
+        }
+
+        // Clear result
+        function clearResult() {
+            document.getElementById('selectedName').textContent = '';
+        }
+    </script>
+</body>
+</html>
