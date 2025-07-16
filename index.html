@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Random Name Picker</title>
+    <title>Random Name Picker - CSV Upload</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 600px;
+            max-width: 700px;
             margin: 50px auto;
             padding: 20px;
             background-color: #f5f5f5;
@@ -26,6 +26,25 @@
             margin-bottom: 30px;
         }
         
+        .upload-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            background-color: #fafafa;
+        }
+        
+        .file-input {
+            margin: 10px 0;
+        }
+        
+        input[type="file"] {
+            margin: 10px 0;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
         button {
             background-color: #007bff;
             color: white;
@@ -34,11 +53,24 @@
             font-size: 16px;
             border-radius: 5px;
             cursor: pointer;
-            margin: 20px 0;
+            margin: 10px 5px;
         }
         
         button:hover {
             background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .pick-button {
+            background-color: #28a745;
+        }
+        
+        .pick-button:hover {
+            background-color: #1e7e34;
         }
         
         .result {
@@ -55,11 +87,14 @@
             padding: 20px;
             background-color: #f8f9fa;
             border-radius: 5px;
+            max-height: 300px;
+            overflow-y: auto;
         }
         
         .name-list h3 {
             margin-top: 0;
             color: #333;
+            text-align: center;
         }
         
         .names {
@@ -68,59 +103,145 @@
             gap: 10px;
             font-size: 14px;
         }
+        
+        .status {
+            margin: 15px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .csv-format {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            text-align: left;
+        }
+        
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎲 Random Name Picker</h1>
+        <h1>🎲 Random Name Picker - CSV Upload</h1>
         
-        <button onclick="pickRandomName()">Pick a Random Name!</button>
-        
-        <div class="result" id="selectedName">
-            Click the button to pick a name
+        <div class="upload-section">
+            <h3>Upload CSV File</h3>
+            <div class="file-input">
+                <input type="file" id="csvFile" accept=".csv" onchange="handleFileUpload(event)">
+                <button onclick="loadSampleData()">Use Sample Data</button>
+            </div>
+            <div class="csv-format">
+                <strong>CSV Format:</strong> One name per line or comma-separated names<br>
+                Example: Alice,Bob,Charlie or each name on a new line
+            </div>
         </div>
         
-        <div class="name-list">
-            <h3>Available Names:</h3>
+        <div id="status" class="status hidden"></div>
+        
+        <div id="controls" class="hidden">
+            <button class="pick-button" onclick="pickRandomName()">🎲 Pick a Random Name!</button>
+            <button onclick="clearData()">Clear Data</button>
+        </div>
+        
+        <div class="result" id="selectedName"></div>
+        
+        <div class="name-list hidden" id="nameListContainer">
+            <h3>Loaded Names (<span id="nameCount">0</span>)</h3>
             <div class="names" id="namesList"></div>
         </div>
     </div>
 
     <script>
-        // List of names - you can easily modify this array
-        const names = [
-            "Alice", "Bob", "Charlie", "Diana", "Edward",
-            "Fiona", "George", "Hannah", "Isaac", "Julia",
-            "Kevin", "Luna", "Michael", "Nina", "Oliver",
-            "Petra", "Quinn", "Rachel", "Samuel", "Tina",
-            "Ulrich", "Victoria", "William", "Xara", "Yuki", "Zoe"
-        ];
+        let names = [];
 
-        // Function to pick a random name
-        function pickRandomName() {
-            const randomIndex = Math.floor(Math.random() * names.length);
-            const selectedName = names[randomIndex];
-            
-            // Display the selected name with a nice animation effect
-            const resultElement = document.getElementById('selectedName');
-            resultElement.style.opacity = '0';
-            
-            setTimeout(() => {
-                resultElement.textContent = `🎉 ${selectedName}`;
-                resultElement.style.opacity = '1';
-            }, 150);
+        // Handle file upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+                showStatus('Please select a valid CSV file.', 'error');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const csvContent = e.target.result;
+                parseCSV(csvContent);
+            };
+            reader.readAsText(file);
         }
 
-        // Function to display all names in the list
-        function displayNamesList() {
-            const namesListElement = document.getElementById('namesList');
-            namesListElement.innerHTML = names.map(name => `<div>${name}</div>`).join('');
+        // Parse CSV content
+        function parseCSV(csvContent) {
+            try {
+                // Split by lines first, then by commas
+                const lines = csvContent.split('\n');
+                const parsedNames = [];
+
+                lines.forEach(line => {
+                    line = line.trim();
+                    if (line) {
+                        // Check if line contains commas (comma-separated)
+                        if (line.includes(',')) {
+                            const lineNames = line.split(',').map(name => name.trim()).filter(name => name);
+                            parsedNames.push(...lineNames);
+                        } else {
+                            // Single name per line
+                            parsedNames.push(line);
+                        }
+                    }
+                });
+
+                // Remove duplicates and empty entries
+                names = [...new Set(parsedNames)].filter(name => name.length > 0);
+
+                if (names.length === 0) {
+                    showStatus('No valid names found in the CSV file.', 'error');
+                    return;
+                }
+
+                showStatus(`Successfully loaded ${names.length} names!`, 'success');
+                displayNamesList();
+                showControls();
+                clearResult();
+
+            } catch (error) {
+                showStatus('Error parsing CSV file. Please check the format.', 'error');
+                console.error('CSV parsing error:', error);
+            }
         }
 
-        // Initialize the page
-        window.onload = function() {
+        // Load sample data for demonstration
+        function loadSampleData() {
+            names = [
+                "Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Edward Norton",
+                "Fiona Apple", "George Lucas", "Hannah Montana", "Isaac Newton", "Julia Roberts",
+                "Kevin Hart", "Luna Lovegood", "Michael Jordan", "Nina Simone", "Oliver Twist",
+                "Petra Collins", "Quinn Fabray", "Rachel Green", "Samuel Jackson", "Tina Turner"
+            ];
+            
+            showStatus(`Sample data loaded with ${names.length} names!`, 'success');
             displayNamesList();
-        };
-    </script>
-</body>
-</html>
+            showControls();
+            clearResult();
+        }
+
+        // Pick a random name
+        function pickRandomName() {
+            if (names.length === 0) {
+                showStatus
