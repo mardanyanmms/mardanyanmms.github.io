@@ -476,9 +476,15 @@
             const resultElement = document.getElementById('selectedName');
             resultElement.style.opacity = '0';
             
+            const audio = new Audio('./drum-roll.mp3');
+            
             setTimeout(() => {
                 resultElement.textContent = `🥁`;
                 resultElement.style.opacity = '1';
+            }, 100);
+
+            setTimeout(() => {
+                audio.play();
             }, 100);
 
             setTimeout(() => {
